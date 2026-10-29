@@ -1,0 +1,138 @@
+nodeSelector:
+  kubernetes.io/hostname: k8s-node1
+
+# ================= 1. 配置 Alertmanager =================
+alertmanager:
+  enabled: true
+  config:
+    global:
+      resolve_timeout: 5m
+      smtp_smarthost: 'smtp.163.com:465'
+      smtp_from: 'Cube1109@163.com'
+      smtp_auth_username: 'Cube1109@163.com'
+      smtp_auth_password: 'BEaMSSRgLmtuB9GD'
+      smtp_require_tls: true
+    route:
+      group_by: ['alertname', 'namespace']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: '163-email'
+    receivers:
+    - name: '163-email'
+      email_configs:
+      - to: 'Cube1109@163.com'
+        send_resolved: true
+        headers:
+          subject: '【🔥 告警触发】{{ .GroupLabels.alertname }}'
+  # 核心：资源、存储、副本数等必须写在 alertmanagerSpec 下面
+  alertmanagerSpec:
+    nodeSelector:
+      kubernetes.io/hostname: k8s-node1
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { cpu: 200m, memory: 256Mi }
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: "nfs-client"
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests: { storage: 2Gi }
+  service:
+    type: LoadBalancer
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: 192.168.148.243
+
+# ================= 2. 核心告警规则 (PrometheusRule) =================
+additionalPrometheusRulesMap:
+  core-alerts:
+    groups:
+    - name: Node-Alerts
+      rules:
+      - alert: 节点宕机 (NodeDown)
+        expr: up{job="node-exporter"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations: { description: "节点 {{ $labels.instance }} 已经失联超过 1 分钟！" }
+      - alert: 节点内存过高 (HighMemory)
+        expr: 100 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 85
+        for: 2m
+        labels: { severity: warning }
+        annotations: { description: "节点 {{ $labels.instance }} 内存使用率超过 85%！" }
+    - name: Pod-Alerts
+      rules:
+      - alert: Pod频繁重启 (PodCrashLooping)
+        expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+        for: 1m
+        labels: { severity: warning }
+        annotations: { description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} 在过去15分钟内重启超过3次！" }
+
+# ================= 3. Prometheus 核心 =================
+prometheus:
+  prometheusSpec:
+    nodeSelector:
+      kubernetes.io/hostname: k8s-node1
+    retention: 5d
+    retentionSize: 8GB
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits: { cpu: 800m, memory: 1.5Gi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: nfs-client
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests: { storage: 8Gi }
+  service:
+    type: LoadBalancer
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: 192.168.148.244
+
+# ================= 4. Grafana =================
+grafana:
+  nodeSelector:
+    kubernetes.io/hostname: k8s-node1
+  initChownData: { enabled: false }
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 300m, memory: 512Mi }
+  persistence:
+    enabled: true
+    storageClassName: "nfs-client"
+    size: 5Gi
+  service:
+    type: LoadBalancer
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: 192.168.148.242
+  grafana.ini:
+    server:
+      domain: grafana.kubex.com
+      root_url: "%(protocol)s://%(domain)s/"
+
+prometheusOperator:
+  nodeSelector:
+    kubernetes.io/hostname: k8s-node1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+kube-state-metrics:
+  nodeSelector:
+    kubernetes.io/hostname: k8s-node1
+  image:
+    tag: v2.16.0
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 100m, memory: 128Mi }
+
+# 关闭无法抓取的控制面组件监控，消除 TargetDown 误报
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false

@@ -1,0 +1,55 @@
+expose:
+  type: loadBalancer
+  loadBalancer:
+    IP: "192.168.148.247"
+  tls:
+    enabled: false
+
+externalURL: http://harbor.kubex.com
+
+core:
+  nodeSelector: { kubernetes.io/hostname: k8s-node2 }
+  resources: { requests: { memory: 256Mi, cpu: 100m }, limits: { memory: 512Mi, cpu: 500m } }
+jobservice:
+  nodeSelector: { kubernetes.io/hostname: k8s-node2 }
+  resources: { requests: { memory: 128Mi, cpu: 100m }, limits: { memory: 256Mi, cpu: 500m } }
+registry:
+  nodeSelector: { kubernetes.io/hostname: k8s-node2 }
+  resources: { requests: { memory: 128Mi, cpu: 100m }, limits: { memory: 256Mi, cpu: 500m } }
+portal:
+  nodeSelector: { kubernetes.io/hostname: k8s-node2 }
+  resources: { requests: { memory: 64Mi, cpu: 50m }, limits: { memory: 128Mi, cpu: 200m } }
+
+trivy:
+  enabled: false
+notary:
+  enabled: false
+chartmuseum:
+  enabled: false
+
+database:
+  type: internal
+  internal:
+    nodeSelector: { kubernetes.io/hostname: k8s-node2 }
+    resources: { requests: { memory: 256Mi, cpu: 100m }, limits: { memory: 512Mi, cpu: 500m } }
+    persistence:
+      storageClass: "nfs-client"
+      size: 5Gi
+redis:
+  type: internal
+  internal:
+    nodeSelector: { kubernetes.io/hostname: k8s-node2 }
+    resources: { requests: { memory: 128Mi, cpu: 100m }, limits: { memory: 256Mi, cpu: 200m } }
+    persistence:
+      storageClass: "nfs-client"
+      size: 2Gi
+
+persistence:
+  persistentVolumeClaim:
+    registry:
+      storageClass: "nfs-client"
+      size: 20Gi
+    jobservice:
+      jobLog:
+        storageClass: "nfs-client"
+        size: 1Gi

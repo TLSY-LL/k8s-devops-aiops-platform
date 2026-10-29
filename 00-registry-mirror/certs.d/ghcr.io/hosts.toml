@@ -1,0 +1,4 @@
+server = "https://ghcr.nju.edu.cn"
+
+[host."https://ghcr.nju.edu.cn"]
+  capabilities = ["pull", "resolve", "push"]

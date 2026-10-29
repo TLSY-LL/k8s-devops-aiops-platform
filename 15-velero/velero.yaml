@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloud-credentials
+  namespace: velero
+stringData:
+  cloud: |
+    [default]
+    aws_access_key_id=minioadmin
+    aws_secret_access_key=minioadmin123
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: velero
+  namespace: velero
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: velero
+subjects:
+  - kind: ServiceAccount
+    name: velero
+    namespace: velero
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: velero
+  namespace: velero
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: velero
+  template:
+    metadata:
+      labels:
+        name: velero
+    spec:
+      serviceAccountName: velero
+      nodeSelector:
+        kubernetes.io/hostname: k8s-node2
+      containers:
+        - name: velero
+          image: docker.io/velero/velero:v1.14.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /velero
+          args:
+            - server
+
+          env:
+            - name: VELERO_SCRATCH_DIR
+              value: /scratch
+            - name: AWS_SHARED_CREDENTIALS_FILE
+              value: /credentials/cloud
+          volumeMounts:
+            - name: plugins
+              mountPath: /plugins
+            - name: cloud-credentials
+              mountPath: /credentials
+            - name: scratch
+              mountPath: /scratch
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      initContainers:
+        - name: velero-plugin-for-aws
+          image: docker.io/velero/velero-plugin-for-aws:v1.10.0
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: plugins
+              mountPath: /target
+      volumes:
+        - name: plugins
+          emptyDir: {}
+        - name: cloud-credentials
+          secret:
+            secretName: cloud-credentials
+        - name: scratch
+          emptyDir: {}
+---
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: default
+  namespace: velero
+spec:
+  provider: aws
+  objectStorage:
+    bucket: velero
+  config:
+    region: minio
+    s3ForcePathStyle: "true"
+    s3Url: http://minio.velero.svc.cluster.local:9000
+  credential:
+    name: cloud-credentials
+    key: cloud

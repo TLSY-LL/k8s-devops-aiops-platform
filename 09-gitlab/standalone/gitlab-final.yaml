@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-app
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-pvc
+  namespace: gitlab-app
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab
+  namespace: gitlab-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab
+  template:
+    metadata:
+      labels:
+        app: gitlab
+    spec:
+      # 核心：死死绑定到 master 节点
+      nodeSelector:
+        kubernetes.io/hostname: k8s-master
+      containers:
+      - name: gitlab
+        image: gitlab/gitlab-ce:17.6.0-ce.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+          name: http
+        - containerPort: 22
+          name: ssh
+        env:
+        - name: TZ
+          value: Asia/Shanghai
+        - name: GITLAB_OMNIBUS_CONFIG
+          value: |
+            external_url 'http://gitlab.kubex.com'
+            gitlab_rails['initial_root_password'] = 'Kx7#pQ2$Lm9@vR4'
+            gitlab_rails['env'] = { 'GITLAB_RAILS_ALLOW_INSECURE_CSRF' => '1' }
+            puma['worker_processes'] = 0
+            sidekiq['max_concurrency'] = 5
+            prometheus_monitoring['enable'] = false
+        volumeMounts:
+        - name: data
+          mountPath: /var/opt/gitlab
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: gitlab-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab
+  namespace: gitlab-app
+spec:
+  type: LoadBalancer
+  selector:
+    app: gitlab
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  - name: ssh
+    port: 22
+    targetPort: 22

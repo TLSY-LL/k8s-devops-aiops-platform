@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kuboard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kuboard-data
+  namespace: kuboard
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kuboard
+  namespace: kuboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: kuboard }
+  template:
+    metadata:
+      labels: { app: kuboard }
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-node2
+      containers:
+      - name: kuboard
+        image: eipwork/kuboard:v3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+        env:
+        - name: KUBOARD_ENDPOINT
+          value: "http://192.168.148.245"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        resources:
+          requests: { cpu: 100m, memory: 256Mi }
+          limits: { cpu: 500m, memory: 512Mi }
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: kuboard-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kuboard
+  namespace: kuboard
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: 192.168.148.245
+spec:
+  type: LoadBalancer
+  selector:
+    app: kuboard
+  ports:
+  - name: web
+    port: 80
+    targetPort: 80

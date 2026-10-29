@@ -1,0 +1,12 @@
+# 忽略打包的快照和压缩包
+*.tar.gz
+*.tgz
+/banbe/
+
+# 忽略 Python 缓存
+__pycache__/
+*.pyc
+
+# 忽略本地密码资产文件（确保安全）
+10-jiance/Credentials-Card.md
+10-jiance/Cluster-Final-Audit.md

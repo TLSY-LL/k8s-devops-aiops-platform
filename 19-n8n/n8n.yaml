@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: n8n
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: n8n-pvc
+  namespace: n8n
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n
+  namespace: n8n
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: n8n }
+  template:
+    metadata:
+      labels: { app: n8n }
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-node2
+      containers:
+      - name: n8n
+        image: docker.1ms.run/n8nio/n8n:1.84.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5678
+        env:
+        - name: N8N_PORT
+          value: "5678"
+        - name: GENERIC_TIMEZONE
+          value: "Asia/Shanghai"
+        - name: N8N_SECURE_COOKIE
+          value: "false"
+        volumeMounts:
+        - name: data
+          mountPath: /home/node/.n8n
+        resources:
+          requests: { cpu: 100m, memory: 256Mi }
+          limits: { cpu: 500m, memory: 1Gi }
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: n8n-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: n8n
+  namespace: n8n
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: 192.168.148.249
+spec:
+  type: LoadBalancer
+  selector: { app: n8n }
+  ports:
+  - name: web
+    port: 80
+    targetPort: 5678

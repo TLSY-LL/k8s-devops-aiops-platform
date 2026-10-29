@@ -1,0 +1,4 @@
+server = "https://docker.m.daocloud.io"
+
+[host."https://docker.m.daocloud.io"]
+  capabilities = ["pull", "resolve", "push"]
