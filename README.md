@@ -25,7 +25,6 @@
 ## 🚀 快速开始
 
 ### 1. 前置要求
-
 - 至少 3 台节点（Master + Node1 + Node2），建议每台 4核 8G 内存起步。
 - 已安装并初始化好 K8s 集群、Calico 网络与 NFS 存储。
 - 集群内需能访问 `docker.1ms.run` 等国内加速源。
@@ -69,7 +68,26 @@ TLSY-Cloud/
 ├── 03-monitoring/          # 可观测性 (Prometheus, Grafana, Alertmanager)
 ├── 04-aiops/               # 智能运维 (n8n, TLSY AIOps 控制台)
 ├── 05-apps/                # 测试应用与运维脚本
+├── scripts/                # 离线镜像导入导出等实用脚本
 └── docs/                   # 架构图、使用文档、凭证清单
+📦 纯离线/内网部署 (无外网环境必备)
+如果你的服务器完全无法访问互联网（或者国内拉取镜像极慢），本项目支持离线镜像包部署。
+
+1. 获取离线镜像包
+自行导出：在一台已部署成功的机器上，运行 bash scripts/export-images.sh，将生成的 TLSY-Cloud-images.tar.gz 拷贝到目标内网机器。
+
+官方下载：请前往 GitHub Releases 或 百度网盘（链接待补充）下载全套镜像包。
+
+2. 导入镜像
+将离线包上传至 K8s 的任意一个 Master 或 Node 节点，执行：
+
+bash
+bash scripts/import-images.sh /path/to/TLSY-Cloud-images.tar.gz
+3. 部署集群
+镜像导入完成后，像往常一样执行一键部署即可：
+
+bash
+make deploy
 🛡️ 免责声明
 本项目包含了 Kaniko 和特权容器配置，请务必在内网测试环境或个人开发环境使用。若用于生产环境，请务必修改所有默认密码，并配置完善的 RBAC 权限与网络隔离策略。
 
