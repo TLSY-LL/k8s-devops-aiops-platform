@@ -1,0 +1,358 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tlsy-aiops
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tlsy-sa
+  namespace: tlsy-aiops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tlsy-view-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+- kind: ServiceAccount
+  name: tlsy-sa
+  namespace: tlsy-aiops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tlsy-metrics-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tlsy-metrics-reader
+subjects:
+- kind: ServiceAccount
+  name: tlsy-sa
+  namespace: tlsy-aiops
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tlsy-pvc
+  namespace: tlsy-aiops
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: nfs-client
+---
+apiVersion: v1
+data:
+  app.py: "import json\nimport urllib.request\nimport ssl\nimport os\nimport subprocess\n\
+    from http.server import BaseHTTPRequestHandler, HTTPServer\n\nHTML_PAGE = \"\"\
+    \"\n<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n    <meta charset=\"UTF-8\"\
+    >\n    <title>TLSY AIOps Copilot</title>\n    <script src=\"https://cdn.tailwindcss.com\"\
+    ></script>\n    <script src=\"https://cdn.jsdelivr.net/npm/marked/marked.min.js\"\
+    ></script>\n    <style>\n        body { background-color: #f8fafc; color: #1e293b;\
+    \ font-family: 'Inter', system-ui, sans-serif; }\n        .chat-container { height:\
+    \ calc(100vh - 80px); overflow-y: auto; scroll-behavior: smooth; }\n        .message-user\
+    \ { background-color: #3b82f6; color: white; border-radius: 12px 12px 0 12px;\
+    \ }\n        .message-ai { background-color: #ffffff; border: 1px solid #e2e8f0;\
+    \ color: #334155; border-radius: 12px 12px 12px 0; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);\
+    \ }\n        .message-system { background-color: #fef2f2; border: 1px solid #fecaca;\
+    \ color: #991b1b; border-radius: 8px; }\n        .message-ai p { margin-bottom:\
+    \ 8px; }\n        .message-ai pre { background-color: #f1f5f9; padding: 10px;\
+    \ border-radius: 6px; overflow-x: auto; font-size: 13px; margin-top: 8px; position:\
+    \ relative; }\n        .message-ai code { background-color: #f1f5f9; padding:\
+    \ 2px 4px; border-radius: 4px; font-family: monospace; }\n        .exec-btn {\
+    \ position: absolute; top: 8px; right: 8px; background: #ef4444; color: white;\
+    \ font-size: 12px; padding: 4px 8px; border-radius: 4px; cursor: pointer; display:\
+    \ none; }\n        pre:hover .exec-btn { display: block; }\n        .nav-item\
+    \ { cursor: pointer; transition: all 0.2s; }\n        .nav-item:hover { background-color:\
+    \ #e2e8f0; }\n        .highlight-msg { ring: 2px; ring-color: #3b82f6; }\n   \
+    \ </style>\n</head>\n<body class=\"flex h-screen overflow-hidden\">\n    <!--\
+    \ \u5DE6\u4FA7\u5BFC\u822A -->\n    <aside class=\"w-64 bg-white border-r border-slate-200\
+    \ flex flex-col shadow-sm z-10\">\n        <div class=\"h-16 flex items-center\
+    \ px-6 border-b border-slate-100\">\n            <span class=\"text-xl font-bold\
+    \ bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-teal-400\">TLSY\
+    \ AIOps</span>\n        </div>\n        <nav class=\"flex-1 p-4 space-y-2\">\n\
+    \            <a href=\"#\" class=\"flex items-center px-4 py-3 bg-blue-50 text-blue-600\
+    \ rounded-lg font-medium\"><span class=\"mr-3\">\U0001F4AC</span> \u667A\u80FD\
+    \u5BF9\u8BDD</a>\n        </nav>\n        <div class=\"p-4 border-t border-slate-100\
+    \ text-xs text-slate-400 text-center\">Powered by DeepSeek & K8s</div>\n    </aside>\n\
+    \n    <!-- \u4E2D\u95F4\u804A\u5929\u4E3B\u533A\u57DF -->\n    <main class=\"\
+    flex-1 flex flex-col relative bg-[#f8fafc]\">\n        <header class=\"h-16 bg-white\
+    \ border-b border-slate-200 flex items-center justify-between px-6 shadow-sm\"\
+    >\n            <h1 class=\"text-lg font-semibold text-slate-800\">\u8FD0\u7EF4\
+    \u526F\u9A7E\u9A76</h1>\n            <div class=\"flex items-center space-x-2\
+    \ text-sm text-green-600 bg-green-50 px-3 py-1 rounded-full border border-green-200\"\
+    >\n                <span class=\"w-2 h-2 bg-green-500 rounded-full animate-pulse\"\
+    ></span> \u5927\u6A21\u578B\u5DF2\u8FDE\u63A5 (\u5168\u91CF\u6570\u636E\u5DF2\u5F00\
+    \u542F)\n            </div>\n        </header>\n        <div id=\"chat-container\"\
+    \ class=\"chat-container p-6 flex flex-col space-y-6\"></div>\n        <div class=\"\
+    p-4 bg-white border-t border-slate-200\">\n            <form id=\"chat-form\"\
+    \ class=\"max-w-4xl mx-auto flex items-center space-x-3\">\n                <input\
+    \ type=\"text\" id=\"chat-input\" autocomplete=\"off\" placeholder=\"\u5411\u526F\
+    \u9A7E\u9A76\u63D0\u95EE...\" class=\"flex-1 px-4 py-3 bg-slate-50 border border-slate-200\
+    \ rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white\
+    \ transition-all text-slate-700\">\n                <button type=\"submit\" class=\"\
+    bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-xl font-medium shadow-sm\
+    \ transition-colors flex items-center\">\u53D1\u9001 <span class=\"ml-2\">\u27A4\
+    </span></button>\n            </form>\n        </div>\n    </main>\n\n    <!--\
+    \ \u53F3\u4FA7\u6D88\u606F\u5B9A\u4F4D\u5BFC\u822A -->\n    <aside class=\"w-64\
+    \ bg-white border-l border-slate-200 flex flex-col shadow-sm z-10 hidden md:flex\"\
+    >\n        <div class=\"h-16 flex items-center px-6 border-b border-slate-100\"\
+    >\n            <span class=\"text-md font-semibold text-slate-700\">\U0001F4CD\
+    \ \u6D88\u606F\u5B9A\u4F4D</span>\n        </div>\n        <div id=\"right-nav\"\
+    \ class=\"flex-1 overflow-y-auto p-2 space-y-1\">\n            <!-- \u5BFC\u822A\
+    \u9879\u901A\u8FC7 JS \u52A8\u6001\u751F\u6210 -->\n        </div>\n    </aside>\n\
+    \n    <script>\n        const container = document.getElementById('chat-container');\n\
+    \        const form = document.getElementById('chat-form');\n        const input\
+    \ = document.getElementById('chat-input');\n        const rightNav = document.getElementById('right-nav');\n\
+    \        let lastMessageCount = 0;\n\n        function renderMessages(messages)\
+    \ {\n            if (messages.length === lastMessageCount) return;\n         \
+    \   \n            // \u8BB0\u5F55\u5F53\u524D\u6EDA\u52A8\u4F4D\u7F6E\uFF0C\u907F\
+    \u514D\u5237\u65B0\u65F6\u8DF3\u56DE\u9876\u90E8\n            const isAtBottom\
+    \ = container.scrollHeight - container.scrollTop <= container.clientHeight + 100;\n\
+    \n            container.innerHTML = '';\n            rightNav.innerHTML = '';\n\
+    \n            if (messages.length === 0) {\n                container.innerHTML\
+    \ = `<div class=\"flex justify-start\"><div class=\"message-ai p-4 max-w-[80%]\"\
+    > \u4F60\u597D\uFF01\u6211\u662F\u8FD0\u884C\u5728\u96C6\u7FA4\u5185\u90E8\u7684\
+    \u526F\u9A7E\u9A76\uFF0C\u6211\u5DF2\u7ECF\u63A5\u5165\u4E86 Metrics \u548C Events\
+    \ \u6743\u9650\u3002\u4F60\u53EF\u4EE5\u76F4\u63A5\u95EE\u6211\u8D1F\u8F7D\uFF0C\
+    \u6216\u8005\u8BA9\u6211\u7ED9\u4F60\u6392\u67E5\u547D\u4EE4\uFF08\u70B9 \u51FB\
+    \u201C\u786E\u8BA4\u6267\u884C\u201D\u6309\u94AE\u5373\u53EF\u8FD0\u884C\uFF09\
+    \u3002</div></div>`;\n            }\n\n            messages.forEach((msg, index)\
+    \ => {\n                const div = document.createElement('div');\n         \
+    \       const bubbleId = `msg-${index}`;\n                div.id = bubbleId;\n\
+    \n                if (msg.role === 'user') {\n                    div.className\
+    \ = 'flex justify-end';\n                    div.innerHTML = `<div class=\"message-user\
+    \ p-4 max-w-[80%]\">${msg.content}</div>`;\n                    \n           \
+    \         // \u6DFB\u52A0\u5230\u53F3\u4FA7\u5BFC\u822A\n                    addNavItem(bubbleId,\
+    \ `\U0001F4AC ${msg.content.substring(0, 10)}...`, 'user');\n                }\
+    \ else if (msg.role === 'system') {\n                    div.className = 'flex\
+    \ justify-center my-2';\n                    div.innerHTML = `<div class=\"message-system\
+    \ p-3 max-w-[90%] text-sm flex items-center\"><span class=\"text-lg mr-2\">\U0001F6A8\
+    </span><div><strong>\u7CFB\u7EDF\u544A\u8B66\uFF1A${msg.alertname}</strong><br>${marked.parse(msg.content)}</div></div>`;\n\
+    \                    \n                    // \u6DFB\u52A0\u5230\u53F3\u4FA7\u5BFC\
+    \u822A\n                    addNavItem(bubbleId, `\U0001F6A8 ${msg.alertname}`,\
+    \ 'system');\n                } else {\n                    div.className = 'flex\
+    \ justify-start';\n                    let html = marked.parse(msg.content);\n\
+    \                    html = html.replace(/<pre><code class=\"language-bash\">([\\\
+    s\\S]*?)<\\/code><\\/pre>/g, (match, p1) => {\n                        const safeCmd\
+    \ = p1.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();\n\
+    \                        return `<pre><code class=\"language-bash\">${p1}</code><button\
+    \ class=\"exec-btn\" onclick=\"execCmd('${safeCmd}')\">\u26A0\uFE0F \u786E\u8BA4\
+    \u6267\u884C</button></pre>`;\n                    });\n                    div.innerHTML\
+    \ = `<div class=\"message-ai p-4 max-w-[80%]\">${html}</div>`;\n             \
+    \   }\n                container.appendChild(div);\n            });\n\n      \
+    \      lastMessageCount = messages.length;\n            \n            // \u5982\
+    \u679C\u4E4B\u524D\u5C31\u5728\u5E95\u90E8\uFF0C\u6216\u8005\u6D88\u606F\u5F88\
+    \u5C11\uFF0C\u81EA\u52A8\u6EDA\u52A8\u5230\u5E95\u90E8\n            if (isAtBottom\
+    \ || messages.length <= 2) {\n                container.scrollTop = container.scrollHeight;\n\
+    \            }\n        }\n\n        function addNavItem(targetId, text, type)\
+    \ {\n            const btn = document.createElement('div');\n            btn.className\
+    \ = 'nav-item px-3 py-2 rounded-md text-xs text-slate-600 truncate';\n       \
+    \     if (type === 'system') btn.classList.add('text-red-600', 'font-semibold',\
+    \ 'bg-red-50');\n            btn.innerText = text;\n            btn.onclick =\
+    \ () => {\n                const el = document.getElementById(targetId);\n   \
+    \             if (el) {\n                    el.scrollIntoView({ behavior: 'smooth',\
+    \ block: 'center' });\n                    // \u9AD8\u4EAE\u95EA\u70C1\u6548\u679C\
+    \n                    const bubble = el.firstElementChild;\n                 \
+    \   if(bubble) {\n                        bubble.style.boxShadow = \"0 0 15px\
+    \ rgba(59, 130, 246, 0.8)\";\n                        setTimeout(() => { bubble.style.boxShadow\
+    \ = \"\"; }, 1500);\n                    }\n                }\n            };\n\
+    \            rightNav.appendChild(btn);\n        }\n\n        async function fetchMessages()\
+    \ {\n            try {\n                const res = await fetch('/api/messages');\n\
+    \                const data = await res.json();\n                renderMessages(data.messages);\n\
+    \            } catch (e) {}\n        }\n\n        form.addEventListener('submit',\
+    \ async (e) => {\n            e.preventDefault();\n            const text = input.value.trim();\n\
+    \            if (!text) return;\n            const tempDiv = document.createElement('div');\n\
+    \            tempDiv.className = 'flex justify-end';\n            tempDiv.innerHTML\
+    \ = `<div class=\"message-user p-4 max-w-[80%]\">${text}</div>`;\n           \
+    \ container.appendChild(tempDiv);\n            container.scrollTop = container.scrollHeight;\n\
+    \            input.value = '';\n            fetch('/api/chat', { method: 'POST',\
+    \ headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: text})\
+    \ });\n        });\n\n        async function execCmd(cmd) {\n            if (!confirm(\"\
+    \u26A0\uFE0F \u4F60\u786E\u8BA4\u8981\u6267\u884C\u4EE5\u4E0B\u547D\u4EE4\u5417\
+    \uFF1F\\\\n\\\\n\" + cmd)) return;\n            const res = await fetch('/api/execute',\
+    \ { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({cmd:\
+    \ cmd}) });\n            const data = await res.json();\n            alert(\"\u6267\
+    \u884C\u7ED3\u679C\uFF1A\\\\n\" + data.result);\n        }\n\n        setInterval(fetchMessages,\
+    \ 2000);\n        fetchMessages();\n    </script>\n</body>\n</html>\n\"\"\"\n\n\
+    MESSAGES = []\nDATA_FILE = \"/app/data/history.json\"\nif os.path.exists(DATA_FILE):\n\
+    \    try:\n        with open(DATA_FILE, \"r\", encoding=\"utf-8\") as f: MESSAGES\
+    \ = json.load(f)\n    except: pass\n\ndef save_messages():\n    try:\n       \
+    \ os.makedirs(\"/app/data\", exist_ok=True)\n        with open(DATA_FILE, \"w\"\
+    , encoding=\"utf-8\") as f: json.dump(MESSAGES, f, ensure_ascii=False)\n    except:\
+    \ pass\n\nDEEPSEEK_API_KEY = os.environ.get(\"DEEPSEEK_API_KEY\", \"YOUR_DEEPSEEK_API_KEY\"\
+    )\n\ndef get_k8s_token():\n    try:\n        with open('/var/run/secrets/kubernetes.io/serviceaccount/token',\
+    \ 'r') as f: return f.read().strip()\n    except: return None\n\ndef get_k8s_data():\n\
+    \    token = get_k8s_token()\n    if not token: return \"\u65E0\u6CD5\u83B7\u53D6\
+    \ Token\"\n    ctx = ssl.create_default_context()\n    ctx.check_hostname = False\n\
+    \    ctx.verify_mode = ssl.CERT_NONE\n    headers = {\"Authorization\": f\"Bearer\
+    \ {token}\"}\n    api_base = \"https://kubernetes.default.svc\"\n\n    status_data\
+    \ = \"\u5F53\u524D\u96C6\u7FA4\u771F\u5B9E\u8FD0\u884C\u72B6\u6001\uFF1A\\n\"\n\
+    \n    try:\n        req = urllib.request.Request(f\"{api_base}/apis/metrics.k8s.io/v1beta1/nodes\"\
+    , headers=headers)\n        with urllib.request.urlopen(req, context=ctx, timeout=5)\
+    \ as response:\n            metrics = json.loads(response.read().decode('utf-8'))\n\
+    \            status_data += \"--- \u8282\u70B9\u5B9E\u65F6\u8D1F\u8F7D (CPU/\u5185\
+    \u5B58) ---\\n\"\n            for m in metrics.get('items', []):\n           \
+    \     status_data += f\"\u8282\u70B9: {m['metadata']['name']}, CPU: {m['usage']['cpu']},\
+    \ \u5185\u5B58: {m['usage']['memory']}\\n\"\n    except Exception as e: status_data\
+    \ += f\"\u83B7\u53D6\u8282\u70B9\u8D1F\u8F7D\u5931\u8D25: {e}\\n\"\n\n    try:\n\
+    \        req = urllib.request.Request(f\"{api_base}/api/v1/pods?fieldSelector=status.phase!=Running,status.phase!=Succeeded\"\
+    , headers=headers)\n        with urllib.request.urlopen(req, context=ctx, timeout=5)\
+    \ as response:\n            pods = json.loads(response.read().decode('utf-8'))\n\
+    \            status_data += \"\\n--- \u5F02\u5E38 Pod \u5217\u8868 ---\\n\"\n\
+    \            if not pods.get('items'): status_data += \"\u65E0\u5F02\u5E38 Pod\u3002\
+    \\n\"\n            else:\n                for p in pods['items']: status_data\
+    \ += f\"Pod: {p['metadata']['name']}, \u547D\u540D\u7A7A\u95F4: {p['metadata']['namespace']},\
+    \ \u72B6\u6001: {p['status'].get('phase')}\\n\"\n    except Exception: status_data\
+    \ += \"\\n\u83B7\u53D6\u5F02\u5E38 Pod \u5931\u8D25\\n\"\n\n    try:\n       \
+    \ req = urllib.request.Request(f\"{api_base}/api/v1/events?fieldSelector=type=Warning&limit=5\"\
+    , headers=headers)\n        with urllib.request.urlopen(req, context=ctx, timeout=5)\
+    \ as response:\n            events = json.loads(response.read().decode('utf-8'))\n\
+    \            status_data += \"\\n--- \u6700\u8FD1 5 \u6761 Warning \u4E8B\u4EF6\
+    \ ---\\n\"\n            if not events.get('items'): status_data += \"\u65E0 Warning\
+    \ \u4E8B\u4EF6\u3002\\n\"\n            else:\n                for e in events['items']:\
+    \ status_data += f\"\u5BF9\u8C61: {e['involvedObject'].get('kind')}/{e['involvedObject'].get('name')},\
+    \ \u539F\u56E0: {e.get('reason', '')}, \u8BE6\u60C5: {e.get('message', '')}\\\
+    n\"\n    except Exception: status_data += \"\\n\u83B7\u53D6\u4E8B\u4EF6\u5931\u8D25\
+    \\n\"\n    return status_data\n\ndef call_deepseek(user_text):\n    k8s_info =\
+    \ get_k8s_data()\n    url = \"https://api.deepseek.com/chat/completions\"\n  \
+    \  headers = {\"Content-Type\": \"application/json\", \"Authorization\": f\"Bearer\
+    \ {DEEPSEEK_API_KEY}\"}\n    \n    sys_prompt = (\n        \"\u4F60\u662F\u4E00\
+    \u4E2A\u9AD8\u7EA7 K8s \u8FD0\u7EF4\u4E13\u5BB6\uFF0C\u8FD0\u884C\u5728\u672C\u5730\
+    \u96C6\u7FA4\u5185\u90E8\uFF08TLSY AIOps \u526F\u9A7E\u9A76\uFF09\u3002\\n\"\n\
+    \        \"\u4F60\u73B0\u5728\u62E5\u6709\u96C6\u7FA4\u7684\u53EA\u8BFB\u6743\u9650\
+    \uFF0C\u5E76\u4E14\u524D\u7AEF\u652F\u6301\u901A\u8FC7\u4E8C\u6B21\u786E\u8BA4\
+    \u6765\u6267\u884C\u4F60\u63D0\u4F9B\u7684 Bash \u547D\u4EE4\u3002\\n\"\n    \
+    \    \"\u8BF7\u9075\u5FAA\u4EE5\u4E0B\u89C4\u5219\uFF1A\\n\"\n        \"1. \u5982\
+    \u679C\u7528\u6237\u95EE\u4F60\u8D1F\u8F7D\u3001\u72B6\u6001\u7B49\uFF0C\u4F60\
+    \u53EF\u4EE5\u76F4\u63A5\u6839\u636E\u3010\u96C6\u7FA4\u5B9E\u65F6\u6570\u636E\
+    \u3011\u56DE\u7B54\uFF0C\u4E0D\u8981\u518D\u8BF4\u201C\u6211\u65E0\u6CD5\u67E5\
+    \u770B\u201D\u3002\\n\"\n        \"2. \u5982\u679C\u67D0\u4E9B\u4FE1\u606F\u4F60\
+    \u65E0\u6CD5\u83B7\u53D6\uFF0C\u8BF7\u7ED9\u51FA\u4E00\u6BB5\u4EE5 ```bash \u5F00\
+    \u5934\u7684\u4EE3\u7801\u5757\u3002\u524D\u7AEF\u4F1A\u81EA\u52A8\u751F\u6210\
+    \u201C\u26A0\uFE0F \u786E\u8BA4\u6267\u884C\u201D\u6309\u94AE\u3002\\n\"\n   \
+    \     \"3. \u4F60\u4E0D\u80FD\u4E3B\u52A8\u6267\u884C\u4EFB\u4F55\u4FEE\u6539\u7C7B\
+    \u547D\u4EE4\uFF08\u5982 delete, apply, patch\uFF09\uFF0C\u53EA\u80FD\u63D0\u4F9B\
+    \u6392\u67E5\u547D\u4EE4\u3002\\n\"\n        \"\u3010\u96C6\u7FA4\u5B9E\u65F6\u6570\
+    \u636E\u3011\\n\" + k8s_info\n    )\n\n    chat_history = []\n    for msg in MESSAGES[-10:]:\n\
+    \        if msg[\"role\"] == \"user\": chat_history.append({\"role\": \"user\"\
+    , \"content\": msg[\"content\"]})\n        elif msg[\"role\"] == \"ai\": chat_history.append({\"\
+    role\": \"assistant\", \"content\": msg[\"content\"]})\n\n    data = {\"model\"\
+    : \"deepseek-chat\", \"messages\": [{\"role\": \"system\", \"content\": sys_prompt}]\
+    \ + chat_history + [{\"role\": \"user\", \"content\": user_text}]}\n    req =\
+    \ urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers,\
+    \ method='POST')\n    try:\n        with urllib.request.urlopen(req, timeout=60)\
+    \ as response:\n            return json.loads(response.read().decode('utf-8'))['choices'][0]['message']['content']\n\
+    \    except Exception as e: return f\"\u5927\u6A21\u578B\u8BF7\u6C42\u5931\u8D25\
+    : {str(e)}\"\n\nclass Handler(BaseHTTPRequestHandler):\n    def do_GET(self):\n\
+    \        if self.path == '/':\n            self.send_response(200); self.send_header('Content-type',\
+    \ 'text/html; charset=utf-8'); self.end_headers(); self.wfile.write(HTML_PAGE.encode('utf-8'))\n\
+    \        elif self.path == '/api/messages':\n            self.send_response(200);\
+    \ self.send_header('Content-type', 'application/json'); self.end_headers(); self.wfile.write(json.dumps({\"\
+    messages\": MESSAGES}).encode('utf-8'))\n\n    def do_POST(self):\n        content_length\
+    \ = int(self.headers['Content-Length'])\n        post_data = json.loads(self.rfile.read(content_length))\n\
+    \n        if self.path == '/api/chat':\n            user_text = post_data.get(\"\
+    text\")\n            MESSAGES.append({\"role\": \"user\", \"content\": user_text});\
+    \ save_messages()\n            ai_reply = call_deepseek(user_text)\n         \
+    \   MESSAGES.append({\"role\": \"ai\", \"content\": ai_reply}); save_messages()\n\
+    \            self.send_response(200); self.end_headers()\n\n        elif self.path\
+    \ == '/api/webhook':\n            alertname = post_data.get(\"alertname\", \"\u672A\
+    \u77E5\")\n            analysis = post_data.get(\"analysis\", \"\u65E0\")\n  \
+    \          MESSAGES.append({\"role\": \"system\", \"alertname\": alertname, \"\
+    content\": analysis}); save_messages()\n            self.send_response(200); self.end_headers();\
+    \ self.wfile.write(b'{\"status\": \"success\"}')\n\n        elif self.path ==\
+    \ '/api/execute':\n            cmd = post_data.get(\"cmd\", \"\").strip()\n  \
+    \          forbidden = [\"delete\", \"rm\", \"apply\", \"patch\", \"scale\", \"\
+    restart\", \"create\", \"edit\", \"replace\"]\n            if any(f in cmd for\
+    \ f in forbidden):\n                result = \"\u274C \u5B89\u5168\u62E6\u622A\
+    \uFF1A\u53EA\u5141\u8BB8\u6267\u884C\u53EA\u8BFB\u67E5\u8BE2\u547D\u4EE4\u3002\
+    \"\n            else:\n                try:\n                    result = subprocess.check_output(cmd,\
+    \ shell=True, stderr=subprocess.STDOUT, text=True)\n                except subprocess.CalledProcessError\
+    \ as e:\n                    result = e.output\n                except Exception\
+    \ as e:\n                    result = str(e)\n\n            self.send_response(200);\
+    \ self.send_header('Content-type', 'application/json'); self.end_headers()\n \
+    \           self.wfile.write(json.dumps({\"result\": result}).encode('utf-8'))\n\
+    \nif __name__ == '__main__':\n    server = HTTPServer(('0.0.0.0', 8080), Handler)\n\
+    \    server.serve_forever()\n"
+kind: ConfigMap
+metadata:
+  name: tlsy-app-code
+  namespace: tlsy-aiops
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tlsy-aiops
+  namespace: tlsy-aiops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tlsy-aiops
+  template:
+    metadata:
+      labels:
+        app: tlsy-aiops
+    spec:
+      containers:
+      - command:
+        - python
+        - /app/app.py
+        env:
+        - name: DEEPSEEK_API_KEY
+          value: sk-ada8e68bb32344639522aa8a7d5398b1
+        image: python:3.11-slim
+        name: tlsy-aiops
+        ports:
+        - containerPort: 8080
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        volumeMounts:
+        - mountPath: /app
+          name: code
+        - mountPath: /app/data
+          name: data
+        - mountPath: /usr/local/bin/kubectl
+          name: kubectl
+      nodeSelector:
+        kubernetes.io/hostname: k8s-node2
+      serviceAccountName: tlsy-sa
+      volumes:
+      - configMap:
+          name: tlsy-app-code
+        name: code
+      - name: data
+        persistentVolumeClaim:
+          claimName: tlsy-pvc
+      - hostPath:
+          path: /usr/bin/kubectl
+          type: File
+        name: kubectl
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: 192.168.148.250
+  name: tlsy-aiops
+  namespace: tlsy-aiops
+spec:
+  ports:
+  - name: web
+    port: 80
+    targetPort: 8080
+  selector:
+    app: tlsy-aiops
+  type: LoadBalancer

@@ -1,0 +1,51 @@
+deploymentMode: SingleBinary
+
+# 核心：关闭 Helm Test 校验，从而不需要 Canary
+test:
+  enabled: false
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+singleBinary:
+  replicas: 1
+  nodeSelector:
+    kubernetes.io/hostname: k8s-node1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 400m, memory: 768Mi }
+  persistence:
+    enabled: true
+    storageClass: nfs-client
+    size: 8Gi
+
+read: { replicas: 0 }
+write: { replicas: 0 }
+backend: { replicas: 0 }
+
+# 彻底关闭多余组件
+lokiCanary:
+  enabled: false
+gateway:
+  enabled: false
+chunksCache: { enabled: false }
+resultsCache: { enabled: false }
+
+promtail:
+  enabled: true
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 256Mi }

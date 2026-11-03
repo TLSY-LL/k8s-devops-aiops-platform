@@ -1,0 +1,40 @@
+alertmanager:
+  enabled: true
+  config:
+    global:
+      resolve_timeout: 5m
+      smtp_smarthost: 'smtp.163.com:465'
+      smtp_from: 'Cube1109@163.com'
+      smtp_auth_username: 'Cube1109@163.com'
+      smtp_auth_password: 'BEaMSSRgLmtuB9GD'
+      smtp_require_tls: false
+    route:
+      group_by: ['alertname', 'namespace']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: '163-email'
+    receivers:
+    - name: '163-email'
+      email_configs:
+      - to: 'Cube1109@163.com'
+        send_resolved: true
+        headers:
+          subject: '【🔥 告警触发】{{ .GroupLabels.alertname }}'
+  alertmanagerSpec:
+    nodeSelector:
+      kubernetes.io/hostname: k8s-node1
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { cpu: 200m, memory: 256Mi }
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: "nfs-client"
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests: { storage: 2Gi }
+  service:
+    type: LoadBalancer
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: 192.168.148.243

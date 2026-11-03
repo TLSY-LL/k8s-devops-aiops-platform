@@ -1,0 +1,13 @@
+grafana:
+  # 关闭硬编码密码的拦截校验
+  assertNoLeakedSecrets: false
+  grafana.ini:
+    smtp:
+      enabled: true
+      host: smtp.163.com:465
+      user: Cube1109@163.com
+      # 163授权码
+      password: BEaMSSRgLmtuB9GD
+      skip_verify: true
+      from_address: Cube1109@163.com
+      from_name: Grafana-Alert

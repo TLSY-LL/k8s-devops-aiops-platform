@@ -1,0 +1,37 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: emergency-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prom
+spec:
+  groups:
+  - name: cluster-emergency
+    rules:
+    - alert: APIServerThrottling
+      expr: sum(rate(apiserver_flowcontrol_rejected_requests_total[1m])) > 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "🚨 API Server 正在限流 (429)！"
+        description: "有大量请求被 APF 拒绝，可能导致控制面假死。请立刻检查是否有 Watch 风暴。"
+
+    - alert: EtcdHighLatency
+      expr: histogram_quantile(0.99, sum(rate(etcd_request_duration_seconds_bucket[5m])) by (le)) > 1
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "🚨 Etcd 响应延迟极高"
+        description: "Etcd P99 延迟超过 1 秒，物理机磁盘 IO 可能已达瓶颈，极易引发雪崩。"
+
+    - alert: NodeMemoryPressure
+      expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 10
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "⚠️ 节点内存可用率低于 10%"
+        description: "节点 {{ $labels.instance }} 内存即将耗尽，可能触发 Swap 甚至系统死锁。"

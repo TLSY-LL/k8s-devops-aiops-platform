@@ -1,0 +1,391 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tlsy-aiops
+---
+# 1. 权限认证
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tlsy-sa
+  namespace: tlsy-aiops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tlsy-view-binding
+subjects:
+- kind: ServiceAccount
+  name: tlsy-sa
+  namespace: tlsy-aiops
+roleRef:
+  kind: ClusterRole
+  name: view
+  apiGroup: rbac.authorization.k8s.io
+---
+# 2. 持久化存储 (保存聊天记录)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tlsy-pvc
+  namespace: tlsy-aiops
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 1Gi
+---
+# 3. 代码配置
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tlsy-app-code
+  namespace: tlsy-aiops
+data:
+  app.py: |
+    import json
+    import urllib.request
+    import ssl
+    import os
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    HTML_PAGE = """
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8">
+        <title>TLSY AIOps Copilot</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+        <style>
+            body { background-color: #f8fafc; color: #1e293b; font-family: 'Inter', system-ui, sans-serif; }
+            .chat-container { height: calc(100vh - 80px); overflow-y: auto; scroll-behavior: smooth; }
+            .message-user { background-color: #3b82f6; color: white; border-radius: 12px 12px 0 12px; }
+            .message-ai { background-color: #ffffff; border: 1px solid #e2e8f0; color: #334155; border-radius: 12px 12px 12px 0; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); }
+            .message-system { background-color: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 8px; }
+            .message-ai p { margin-bottom: 8px; }
+            .message-ai pre { background-color: #f1f5f9; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 13px; margin-top: 8px; }
+            .message-ai code { background-color: #f1f5f9; padding: 2px 4px; border-radius: 4px; font-family: monospace; }
+        </style>
+    </head>
+    <body class="flex h-screen overflow-hidden">
+        <aside class="w-64 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
+            <div class="h-16 flex items-center px-6 border-b border-slate-100">
+                <span class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-teal-400">TLSY AIOps</span>
+            </div>
+            <nav class="flex-1 p-4 space-y-2">
+                <a href="#" class="flex items-center px-4 py-3 bg-blue-50 text-blue-600 rounded-lg font-medium">
+                    <span class="mr-3">💬</span> 智能对话
+                </a>
+            </nav>
+            <div class="p-4 border-t border-slate-100 text-xs text-slate-400 text-center">
+                Powered by DeepSeek & K8s
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col relative bg-[#f8fafc]">
+            <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shadow-sm">
+                <!-- 标题去掉了括号 -->
+                <h1 class="text-lg font-semibold text-slate-800">运维副驾驶</h1>
+                <div class="flex items-center space-x-2 text-sm text-green-600 bg-green-50 px-3 py-1 rounded-full border border-green-200">
+                    <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> 大模型已连接
+                </div>
+            </header>
+            
+            <div id="chat-container" class="chat-container p-6 flex flex-col space-y-6">
+                <!-- 历史记录由 JS 动态加载 -->
+            </div>
+
+            <div class="p-4 bg-white border-t border-slate-200">
+                <form id="chat-form" class="max-w-4xl mx-auto flex items-center space-x-3">
+                    <input type="text" id="chat-input" autocomplete="off" placeholder="向副驾驶提问，我会记住我们的对话历史..." 
+                        class="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-slate-700">
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-xl font-medium shadow-sm transition-colors flex items-center">
+                        发送 <span class="ml-2">➤</span>
+                    </button>
+                </form>
+            </div>
+        </main>
+
+        <script>
+            const container = document.getElementById('chat-container');
+            const form = document.getElementById('chat-form');
+            const input = document.getElementById('chat-input');
+            let lastMessageCount = 0;
+
+            function renderMessages(messages) {
+                if (messages.length === lastMessageCount) return;
+                container.innerHTML = '';
+                
+                // 如果没有任何记录，显示欢迎语
+                if (messages.length === 0) {
+                    container.innerHTML = `
+                    <div class="flex justify-start">
+                        <div class="message-ai p-4 max-w-[80%]">
+                            你好，我是运维副驾驶！我能读取集群的负载、事件和状态。我的记忆已开启，你可以接着上一句话继续向我提问。
+                        </div>
+                    </div>`;
+                }
+
+                messages.forEach(msg => {
+                    const div = document.createElement('div');
+                    if (msg.role === 'user') {
+                        div.className = 'flex justify-end';
+                        div.innerHTML = `<div class="message-user p-4 max-w-[80%]">${msg.content}</div>`;
+                    } else if (msg.role === 'system') {
+                        div.className = 'flex justify-center my-2';
+                        div.innerHTML = `<div class="message-system p-3 max-w-[90%] text-sm flex items-center">
+                            <span class="text-lg mr-2">🚨</span>
+                            <div><strong>系统告警：${msg.alertname}</strong><br>${marked.parse(msg.content)}</div>
+                        </div>`;
+                    } else {
+                        div.className = 'flex justify-start';
+                        div.innerHTML = `<div class="message-ai p-4 max-w-[80%]">${marked.parse(msg.content)}</div>`;
+                    }
+                    container.appendChild(div);
+                });
+                lastMessageCount = messages.length;
+                container.scrollTop = container.scrollHeight;
+            }
+
+            async function fetchMessages() {
+                try {
+                    const res = await fetch('/api/messages');
+                    const data = await res.json();
+                    renderMessages(data.messages);
+                } catch (e) {}
+            }
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const text = input.value.trim();
+                if (!text) return;
+                
+                const tempDiv = document.createElement('div');
+                tempDiv.className = 'flex justify-end';
+                tempDiv.innerHTML = `<div class="message-user p-4 max-w-[80%]">${text}</div>`;
+                container.appendChild(tempDiv);
+                container.scrollTop = container.scrollHeight;
+                
+                input.value = '';
+                fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({text: text})
+                });
+            });
+
+            setInterval(fetchMessages, 2000);
+            fetchMessages();
+        </script>
+    </body>
+    </html>
+    """
+
+    # 新增：本地持久化文件路径（挂载了 PVC）
+    DATA_FILE = "/app/data/history.json"
+    MESSAGES = []
+    
+    # 初始化读取历史记录
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                MESSAGES = json.load(f)
+        except:
+            pass
+
+    def save_messages():
+        try:
+            os.makedirs("/app/data", exist_ok=True)
+            with open(DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(MESSAGES, f, ensure_ascii=False)
+        except:
+            pass
+
+    DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "YOUR_DEEPSEEK_API_KEY")
+
+    def get_k8s_token():
+        try:
+            with open('/var/run/secrets/kubernetes.io/serviceaccount/token', 'r') as f:
+                return f.read().strip()
+        except:
+            return None
+
+    def get_k8s_data():
+        token = get_k8s_token()
+        if not token: return "无法获取 K8s Token"
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        headers = {"Authorization": f"Bearer {token}"}
+        api_base = "https://kubernetes.default.svc"
+        
+        status_data = "当前集群真实运行状态：\n"
+        # 异常 Pod
+        try:
+            req = urllib.request.Request(f"{api_base}/api/v1/pods?fieldSelector=status.phase!=Running,status.phase!=Succeeded", headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=5) as response:
+                pods = json.loads(response.read().decode('utf-8'))
+                status_data += "--- 异常 Pod 列表 ---\n"
+                if not pods.get('items'): status_data += "无异常 Pod。\n"
+                else:
+                    for p in pods['items']: status_data += f"Pod: {p['metadata']['name']}, 命名空间: {p['metadata']['namespace']}, 状态: {p['status'].get('phase')}\n"
+        except Exception as e: status_data += f"获取异常 Pod 失败\n"
+
+        # 节点负载
+        try:
+            req = urllib.request.Request(f"{api_base}/apis/metrics.k8s.io/v1beta1/nodes", headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=5) as response:
+                metrics = json.loads(response.read().decode('utf-8'))
+                status_data += "\n--- 节点负载情况 ---\n"
+                for m in metrics.get('items', []):
+                    status_data += f"节点: {m['metadata']['name']}, CPU: {m['usage']['cpu']}, 内存: {m['usage']['memory']}\n"
+        except Exception: status_data += "\n获取节点负载失败\n"
+
+        # Warning 事件
+        try:
+            req = urllib.request.Request(f"{api_base}/api/v1/events?fieldSelector=type=Warning&limit=5", headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=5) as response:
+                events = json.loads(response.read().decode('utf-8'))
+                status_data += "\n--- 最近 5 条 Warning 事件 ---\n"
+                if not events.get('items'): status_data += "无 Warning 事件。\n"
+                else:
+                    for e in events['items']:
+                        obj = f"{e['involvedObject'].get('kind')}/{e['involvedObject'].get('name')}"
+                        status_data += f"对象: {obj}, 原因: {e.get('reason', '')}, 详情: {e.get('message', '')}\n"
+        except Exception: status_data += "\n获取事件失败\n"
+             
+        return status_data
+
+    def call_deepseek(user_text):
+        k8s_info = get_k8s_data()
+        
+        # 提取最近的对话历史（最多取最后 10 条），传给大模型
+        chat_history = []
+        for msg in MESSAGES[-10:]:
+            if msg["role"] == "user":
+                chat_history.append({"role": "user", "content": msg["content"]})
+            elif msg["role"] == "ai":
+                chat_history.append({"role": "assistant", "content": msg["content"]})
+                
+        url = "https://api.deepseek.com/chat/completions"
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
+        
+        sys_prompt = f"你是一个高级 K8s 运维专家。请结合最近的对话历史和以下真实集群状态，回答用户的问题。\n\n【集群实时数据】\n{k8s_info}"
+        
+        payload_messages = [{"role": "system", "content": sys_prompt}]
+        payload_messages.extend(chat_history)
+
+        data = {
+            "model": "deepseek-chat",
+            "messages": payload_messages
+        }
+        req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
+        try:
+            with urllib.request.urlopen(req, timeout=40) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                return res_data['choices'][0]['message']['content']
+        except Exception as e:
+            return f"大模型请求失败: {str(e)}"
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == '/':
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(HTML_PAGE.encode('utf-8'))
+            elif self.path == '/api/messages':
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"messages": MESSAGES}).encode('utf-8'))
+
+        def do_POST(self):
+            content_length = int(self.headers['Content-Length'])
+            post_data = json.loads(self.rfile.read(content_length))
+            
+            if self.path == '/api/chat':
+                user_text = post_data.get("text")
+                MESSAGES.append({"role": "user", "content": user_text})
+                save_messages() # 保存历史
+                
+                ai_reply = call_deepseek(user_text)
+                
+                MESSAGES.append({"role": "ai", "content": ai_reply})
+                save_messages() # 保存历史
+                
+                self.send_response(200)
+                self.end_headers()
+
+            elif self.path == '/api/webhook':
+                alertname = post_data.get("alertname", "未知告警")
+                analysis = post_data.get("analysis", "无分析结果")
+                MESSAGES.append({"role": "system", "alertname": alertname, "content": analysis})
+                save_messages()
+                
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"status": "success"}')
+
+    if __name__ == '__main__':
+        server = HTTPServer(('0.0.0.0', 8080), Handler)
+        print("TLSY AIOps Copilot with Memory running...")
+        server.serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tlsy-aiops
+  namespace: tlsy-aiops
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: tlsy-aiops }
+  template:
+    metadata:
+      labels: { app: tlsy-aiops }
+    spec:
+      serviceAccountName: tlsy-sa 
+      nodeSelector:
+        kubernetes.io/hostname: k8s-node2
+      containers:
+      - name: tlsy-aiops
+        image: python:3.11-slim
+        command: ["python", "/app/app.py"]
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DEEPSEEK_API_KEY
+          value: "YOUR_DEEPSEEK_API_KEY"
+        volumeMounts:
+        - name: code
+          mountPath: /app
+        - name: data
+          mountPath: /app/data
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits: { cpu: 200m, memory: 256Mi }
+      volumes:
+      - name: code
+        configMap:
+          name: tlsy-app-code
+      - name: data
+        persistentVolumeClaim:
+          claimName: tlsy-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tlsy-aiops
+  namespace: tlsy-aiops
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: 192.168.148.250
+spec:
+  type: LoadBalancer
+  selector: { app: tlsy-aiops }
+  ports:
+  - name: web
+    port: 80
+    targetPort: 8080

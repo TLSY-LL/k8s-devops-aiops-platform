@@ -1,0 +1,43 @@
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: 'smtp.163.com:465'
+  smtp_from: 'Cube1109@163.com'
+  smtp_auth_username: 'Cube1109@163.com'
+  smtp_auth_password: 'YOUR_163_SMTP_AUTH_CODE'
+  smtp_require_tls: false
+
+route:
+  group_by: ['alertname', 'namespace']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: '163-email'
+
+receivers:
+- name: '163-email'
+  email_configs:
+  - to: 'Cube1109@163.com'
+    send_resolved: true
+    headers:
+      subject: '【{{ if eq .Status "firing" }}🔥 告警触发{{ else }}✅ 告警恢复{{ end }}】{{ .CommonLabels.alertname }}'
+    html: |
+      <div style="font-family: 'Microsoft YaHei', sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+        <div style="background-color: {{ if eq .Status "firing" }}#f44336{{ else }}#4CAF50{{ end }}; color: white; padding: 15px; text-align: center;">
+          <h2 style="margin: 0;">{{ if eq .Status "firing" }}🚨 告警触发通知{{ else }}✅ 告警恢复通知{{ end }}</h2>
+        </div>
+        <div style="padding: 20px;">
+          <p><strong>告警名称：</strong>{{ .CommonLabels.alertname }}</p>
+          <p><strong>告警级别：</strong>{{ .CommonLabels.severity }}</p>
+          <hr>
+          {{ range .Alerts }}
+          <div style="background-color: #fafafa; border-left: 4px solid {{ if eq .Status "firing" }}#ff4d4f{{ else }}#52c41a{{ end }}; padding: 15px; margin-bottom: 15px;">
+            <p><strong>错误描述：</strong>{{ .Annotations.description }}</p>
+            <p><strong>发生时间：</strong>{{ .StartsAt.Format "2006-01-02 15:04:05" }}</p>
+          </div>
+          {{ end }}
+        </div>
+      </div>
+  # 👇 这里就是发给 n8n 的配置
+  webhook_configs:
+  - url: 'http://n8n.n8n.svc.cluster.local/webhook/alertmanager'
+    send_resolved: false

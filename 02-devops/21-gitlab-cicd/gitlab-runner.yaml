@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-runner
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gitlab-runner-admin
+subjects:
+  - kind: ServiceAccount
+    name: gitlab-runner
+    namespace: gitlab-runner
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-runner-config
+  namespace: gitlab-runner
+data:
+  config.toml: |
+    concurrent = 2
+    check_interval = 0
+    log_level = "info"
+    [[runners]]
+      name = "k8s-runner"
+      url = "https://gitlab.${DOMAIN_SUFFIX}"
+      token = "glrt-t1_G_1UuH8AYNax31yoD6sk"
+      tls-skip-verify = true
+      executor = "kubernetes"
+      run_untagged = true
+      [runners.kubernetes]
+        namespace = "gitlab-runner"
+        image = "docker.1ms.run/library/alpine:latest"
+        cpu_request = "200m"
+        cpu_limit = "2000m"
+        memory_request = "512Mi"
+        memory_limit = "2Gi"
+        helper_cpu_request = "100m"
+        helper_cpu_limit = "500m"
+        helper_memory_request = "128Mi"
+        helper_memory_limit = "256Mi"
+        privileged = true
+        [[runners.kubernetes.host_aliases]]
+          ip = "${VIP_IP}"
+          hostnames = ["gitlab.${DOMAIN_SUFFIX}", "harbor.${DOMAIN_SUFFIX}"]
+        # 👇 挂载本地 Kaniko 二进制
+        [[runners.kubernetes.volumes.host_path]]
+          name = "kaniko-bin"
+          mount_path = "/usr/local/bin/kaniko"
+          host_path = "/usr/local/bin/kaniko"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab-runner
+  namespace: gitlab-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab-runner
+  template:
+    metadata:
+      labels:
+        app: gitlab-runner
+    spec:
+      serviceAccountName: gitlab-runner
+      hostAliases:
+      - ip: "${VIP_IP}"
+        hostnames: ["gitlab.${DOMAIN_SUFFIX}", "harbor.${DOMAIN_SUFFIX}"]
+      containers:
+      - name: gitlab-runner
+        image: docker.1ms.run/gitlab/gitlab-runner:alpine
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits: { cpu: 500m, memory: 256Mi }
+        env:
+        - name: SSL_CERT_FILE
+          value: /etc/ssl/certs/kubex-ca.crt
+        volumeMounts:
+        - name: config
+          mountPath: /etc/gitlab-runner
+        - name: kubex-ca
+          mountPath: /etc/ssl/certs/kubex-ca.crt
+          subPath: kubex-ca.crt
+      volumes:
+      - name: config
+        configMap:
+          name: gitlab-runner-config
+      - name: kubex-ca
+        configMap:
+          name: kubex-ca-cert

@@ -1,0 +1,34 @@
+stages:
+  - build
+  - docker-build
+
+variables:
+  HARBOR_URL: "harbor.${DOMAIN_SUFFIX}"
+  IMAGE_NAME: "$HARBOR_URL/library/java-demo"
+
+build-jar:
+  stage: build
+  image: docker.1ms.run/maven:3.9-eclipse-temurin-17
+  script:
+    - echo "===== Maven 编译 ====="
+    - mvn clean package -DskipTests
+  artifacts:
+    paths:
+      - target/*.jar
+
+docker-build:
+  stage: docker-build
+  image: docker.1ms.run/library/docker:24.0.7-cli
+  services:
+    - name: docker.1ms.run/library/docker:24.0.7-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - echo "admin" | docker login -u "admin" --password-stdin harbor.${DOMAIN_SUFFIX}
+    - docker build -t harbor.${DOMAIN_SUFFIX}/library/java-demo:$CI_COMMIT_SHORT_SHA -t harbor.${DOMAIN_SUFFIX}/library/java-demo:latest .
+    - docker push harbor.${DOMAIN_SUFFIX}/library/java-demo:$CI_COMMIT_SHORT_SHA
+    - docker push harbor.${DOMAIN_SUFFIX}/library/java-demo:latest
+  only:
+    - master

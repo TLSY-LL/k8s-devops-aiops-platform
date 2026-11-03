@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: external-websites
+  namespace: monitoring
+  labels:
+    release: kube-prom
+spec:
+  jobName: blackbox-http
+  interval: 30s
+  module: http_2xx
+  prober:
+    url: blackbox-exporter.monitoring.svc.cluster.local:9115
+  targets:
+    staticConfig:
+      static:
+      - https://gitlab.${DOMAIN_SUFFIX}
+      - https://harbor.${DOMAIN_SUFFIX}
+      - https://aiops.${DOMAIN_SUFFIX}
+      - https://jenkins.${DOMAIN_SUFFIX}
+      - https://argocd.${DOMAIN_SUFFIX}
+      - https://kuboard.${DOMAIN_SUFFIX}
+      - https://grafana.${DOMAIN_SUFFIX}
