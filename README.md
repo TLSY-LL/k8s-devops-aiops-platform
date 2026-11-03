@@ -11,6 +11,17 @@
 
 ---
 
+## ✨ 核心特性
+
+- **⚡ 极速部署**：提供标准化的 `Makefile` 与 `.env` 配置模板，一键拉起所有组件，告别散乱的 YAML。
+- **🔒 全站安全**：基于 NGF 网关与 cert-manager，实现全域名 HTTPS 强制跳转与自签证书自动续期。
+- **🛠️ 无痛 CI/CD**：抛弃重型 Jenkins，拥抱 GitLab Runner + Kaniko。无需特权模式，内置阿里云 Maven 加速，单 Pod 完成编译打包推镜像。
+- **📊 全栈监控**：Prometheus + Grafana + Loki + Blackbox 完美组合，外部域名拨测与内部指标尽在掌握。
+- **🤖 AIOps 副驾驶**：打通 Alertmanager -> n8n -> DeepSeek -> 控制台闭环，支持告警静默分析。
+- **🛡️ 极限防雪崩**：所有组件均配置了合理的 Limits，并预设了 Kubelet `systemReserved` 与防 OOM 策略，适配低配物理机。
+
+---
+
 ## 🗺️ 核心架构图
 
 ```mermaid
@@ -50,3 +61,4 @@ flowchart TB
     D --> M
     D --> O
     Q --> R
+👉 点击查看完整的组件清单与一键部署指南 (INSTALL.md)
