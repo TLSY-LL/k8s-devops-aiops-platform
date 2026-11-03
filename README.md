@@ -14,34 +14,34 @@
 ## 🗺️ 核心架构图
 
 ```mermaid
-flowchart TD
-    subgraph 接入层
+flowchart TB
+    subgraph "接入层"
         A[MetalLB 负载均衡] --> B[NGF 网关 + cert-manager 证书]
     end
 
-    subgraph K8s 底座层
-        C[containerd 容器运行时] --> D[Kubernetes 集群]
+    subgraph "K8s 底座层"
+        C[containerd 容器运行时] --> D[Kubernetes 集群 1.36.5]
         D --> E[Calico 容器网络]
         D --> F[NFS 持久化存储]
+        D --> G[Metrics Server]
     end
 
-    subgraph DevOps 流水线层
-        H[GitLab 代码仓库] --> I[GitLab Runner 动态构建]
-        I --> J[Kaniko 镜像构建]
-        J --> K[Harbor 镜像仓库]
+    subgraph "流水线层"
+        H[GitLab 代码仓库] --> I[GitLab Runner 动态执行]
+        I --> J[Kaniko 无特权镜像构建]
+        J --> K[Harbor 企业级镜像仓库]
         K --> L[ArgoCD GitOps 发布]
     end
 
-    subgraph 可观测性层
+    subgraph "可观测性层"
         M[Prometheus 指标采集] --> N[Grafana 可视化大盘]
-        O[Loki 日志聚合] --> N
-        M --> P[Alertmanager 告警通知]
-        Q[Blackbox 外部拨测] --> M
+        O[Loki + Promtail 日志聚合] --> N
+        P[Blackbox 黑盒域名拨测] --> M
+        M --> Q[Alertmanager 告警降噪]
     end
 
-    subgraph AIOps 智能层
-        P --> R[n8n 自动化编排]
-        R --> S[DeepSeek 大模型分析]
+    subgraph "AIOps 层"
+        R[n8n 自动化编排] --> S[DeepSeek 大模型分析]
         S --> T[TLSYshuchutai 智能控制台]
     end
 
@@ -49,4 +49,4 @@ flowchart TD
     L --> D
     D --> M
     D --> O
-
+    Q --> R
